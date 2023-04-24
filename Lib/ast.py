@@ -60,18 +60,20 @@ def literal_eval(node_or_string):
     if isinstance(node_or_string, Expression):
         node_or_string = node_or_string.body
     def _convert_num(node):
-        if isinstance(node, Constant):
-            if type(node.value) in (int, float, complex):
-                return node.value
-        raise ValueError('malformed node or string: ' + repr(node))
+        if isinstance(node, Constant) and type(node.value) in (
+            int,
+            float,
+            complex,
+        ):
+            return node.value
+        raise ValueError(f'malformed node or string: {repr(node)}')
+
     def _convert_signed_num(node):
         if isinstance(node, UnaryOp) and isinstance(node.op, (UAdd, USub)):
             operand = _convert_num(node.operand)
-            if isinstance(node.op, UAdd):
-                return + operand
-            else:
-                return - operand
+            return + operand if isinstance(node.op, UAdd) else - operand
         return _convert_num(node)
+
     def _convert(node):
         if isinstance(node, Constant):
             return node.value
@@ -88,11 +90,9 @@ def literal_eval(node_or_string):
             left = _convert_signed_num(node.left)
             right = _convert_num(node.right)
             if isinstance(left, (int, float)) and isinstance(right, complex):
-                if isinstance(node.op, Add):
-                    return left + right
-                else:
-                    return left - right
+                return left + right if isinstance(node.op, Add) else left - right
         return _convert_signed_num(node)
+
     return _convert(node_or_string)
 
 
@@ -129,7 +129,7 @@ def dump(node, annotate_fields=True, include_attributes=False, *, indent=None):
                     value, simple = _format(value, level)
                     allsimple = allsimple and simple
                     if keywords:
-                        args.append('%s=%s' % (field, value))
+                        args.append(f'{field}={value}')
                     else:
                         args.append(value)
             if include_attributes and node._attributes:
@@ -141,14 +141,19 @@ def dump(node, annotate_fields=True, include_attributes=False, *, indent=None):
                     else:
                         value, simple = _format(value, level)
                         allsimple = allsimple and simple
-                        args.append('%s=%s' % (attr, value))
+                        args.append(f'{attr}={value}')
             if allsimple and len(args) <= 3:
-                return '%s(%s)' % (node.__class__.__name__, ', '.join(args)), not args
-            return '%s(%s%s)' % (node.__class__.__name__, prefix, sep.join(args)), False
+                return f"{node.__class__.__name__}({', '.join(args)})", not args
+            return f'{node.__class__.__name__}({prefix}{sep.join(args)})', False
         elif isinstance(node, list):
-            if not node:
-                return '[]', True
-            return '[%s%s]' % (prefix, sep.join(_format(x, level)[0] for x in node)), False
+            return (
+                (
+                    f'[{prefix}{sep.join(_format(x, level)[0] for x in node)}]',
+                    False,
+                )
+                if node
+                else ('[]', True)
+            )
         return repr(node), True
 
     if not isinstance(node, AST):
@@ -298,13 +303,7 @@ def _splitlines_no_ff(source):
 
 def _pad_whitespace(source):
     """Replace all chars except '\f\t' in a line with spaces."""
-    result = ''
-    for c in source:
-        if c in '\f\t':
-            result += c
-        else:
-            result += ' '
-    return result
+    return ''.join(c if c in '\f\t' else ' ' for c in source)
 
 
 def get_source_segment(source, node, *, padded=False):
@@ -378,7 +377,7 @@ class NodeVisitor(object):
 
     def visit(self, node):
         """Visit a node."""
-        method = 'visit_' + node.__class__.__name__
+        method = f'visit_{node.__class__.__name__}'
         visitor = getattr(self, method, self.generic_visit)
         return visitor(node)
 
@@ -401,7 +400,7 @@ class NodeVisitor(object):
                     type_name = name
                     break
         if type_name is not None:
-            method = 'visit_' + type_name
+            method = f'visit_{type_name}'
             try:
                 visitor = getattr(self, method)
             except AttributeError:
@@ -487,20 +486,19 @@ Constant.s = property(_getter, _setter)
 
 class _ABC(type):
 
-    def __instancecheck__(cls, inst):
+    def __instancecheck__(self, inst):
         if not isinstance(inst, Constant):
             return False
-        if cls in _const_types:
+        if self in _const_types:
             try:
                 value = inst.value
             except AttributeError:
                 return False
             else:
-                return (
-                    isinstance(value, _const_types[cls]) and
-                    not isinstance(value, _const_types_not.get(cls, ()))
+                return isinstance(value, _const_types[self]) and not isinstance(
+                    value, _const_types_not.get(self, ())
                 )
-        return type.__instancecheck__(cls, inst)
+        return type.__instancecheck__(self, inst)
 
 def _new(cls, *args, **kwargs):
     if cls in _const_types:
